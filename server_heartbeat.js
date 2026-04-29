@@ -21,21 +21,24 @@ function cleanup() {
   }
 }
 
+app.get("/", (req, res) => {
+  res.json({ ok: true, service: "ZTR Launcher Heartbeat Server" });
+});
+
 app.post("/heartbeat/launcher", (req, res) => {
-  const username = req.body.username || "unknown-" + Math.random();
+  const username = req.body.username || "guest";
   onlineLauncher.set(username, { ...req.body, lastSeen: Date.now() });
   res.json({ ok: true });
 });
 
 app.post("/heartbeat/game", (req, res) => {
-  const username = req.body.username || "unknown-" + Math.random();
+  const username = req.body.username || "guest";
   onlineGames.set(username, { ...req.body, lastSeen: Date.now() });
   res.json({ ok: true });
 });
 
 app.get("/status", (req, res) => {
   cleanup();
-
   res.json({
     launcherOnline: onlineLauncher.size,
     gameOnline: onlineGames.size,
@@ -44,6 +47,5 @@ app.get("/status", (req, res) => {
   });
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("ZTR heartbeat server online");
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("ZTR server online on port " + PORT));
