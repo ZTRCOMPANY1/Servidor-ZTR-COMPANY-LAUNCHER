@@ -161,6 +161,7 @@ app.post("/heartbeat/launcher", async (req, res) => {
       bio: user?.bio || req.body.bio || "",
       place: "launcher",
       gameId: "",
+      gameName: "",
       launcherVersion: req.body.launcherVersion || "",
       lastSeen: Date.now()
     });
@@ -183,6 +184,7 @@ app.post("/heartbeat/game", async (req, res) => {
       bio: user?.bio || req.body.bio || "",
       place: "game",
       gameId: req.body.gameId || "",
+      gameName: req.body.gameName || req.body.gameId || "",
       launcherVersion: req.body.launcherVersion || "",
       lastSeen: Date.now()
     });
@@ -194,10 +196,17 @@ app.post("/heartbeat/game", async (req, res) => {
 });
 
 app.post("/offline", async (req, res) => {
-  const username = req.body.username || "guest";
-  if (req.body.place === "game") onlineGames.delete(username);
-  if (req.body.place === "launcher") onlineLauncher.delete(username);
-  res.json({ ok: true });
+  try {
+    const user = await userByToken(req.body.token);
+    const username = user?.username || req.body.username || "guest";
+
+    if (req.body.place === "game") onlineGames.delete(username);
+    if (req.body.place === "launcher") onlineLauncher.delete(username);
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 app.get("/status", async (req, res) => {
@@ -213,7 +222,8 @@ app.get("/status", async (req, res) => {
       gameOnline: onlineGames.size,
       launcherUsers: Array.from(onlineLauncher.values()),
       gameUsers: Array.from(onlineGames.values()),
-      accounts: accountsResult.rows.map(publicUser)
+      accounts: accountsResult.rows.map(publicUser),
+      serverTime: new Date().toISOString()
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
