@@ -1,11 +1,13 @@
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const path = require("path");
 const { Pool } = require("pg");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -14,6 +16,7 @@ const pool = new Pool({
 
 const onlineLauncher = new Map();
 const onlineGames = new Map();
+const ADMIN_KEY = process.env.ADMIN_KEY || "troque-essa-senha";
 
 function sha256(text) {
   return crypto.createHash("sha256").update("ZTR-SALT-" + text).digest("hex");
@@ -37,6 +40,17 @@ async function initDb() {
       last_seen TIMESTAMP DEFAULT NOW()
     );
   `);
+
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE;`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_notifications (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
 }
 
 function publicUser(row) {
@@ -46,7 +60,9 @@ function publicUser(row) {
     playerName: row.player_name,
     avatarUrl: row.avatar_url || "",
     bio: row.bio || "",
-    createdAt: row.created_at ? row.created_at.toISOString?.() || row.created_at : ""
+    banned: !!row.banned,
+    createdAt: row.created_at ? row.created_at.toISOString?.() || row.created_at : "",
+    lastSeen: row.last_seen ? row.last_seen.toISOString?.() || row.last_seen : ""
   };
 }
 
@@ -54,6 +70,12 @@ async function userByToken(authToken) {
   if (!authToken) return null;
   const result = await pool.query("SELECT * FROM users WHERE auth_token=$1", [authToken]);
   return result.rows[0] || null;
+}
+
+function adminOk(req) {
+  return req.headers["x-admin-key"] === ADMIN_KEY ||
+         req.query.key === ADMIN_KEY ||
+         req.body?.key === ADMIN_KEY;
 }
 
 function cleanup() {
@@ -71,6 +93,10 @@ function cleanup() {
 
 app.get("/", (req, res) => {
   res.json({ ok: true, service: "ZTR Company Launcher API" });
+});
+
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
 app.post("/auth/register", async (req, res) => {
@@ -110,6 +136,10 @@ app.post("/auth/login", async (req, res) => {
 
     if (!user || user.password_hash !== sha256(password)) {
       return res.json({ ok: false, error: "Username ou senha incorretos." });
+    }
+
+    if (user.banned) {
+      return res.json({ ok: false, error: "Conta banida." });
     }
 
     const authToken = token();
@@ -214,7 +244,11 @@ app.get("/status", async (req, res) => {
     cleanup();
 
     const accountsResult = await pool.query(
-      "SELECT id, username, player_name, avatar_url, bio, created_at FROM users ORDER BY id DESC"
+      "SELECT id, username, player_name, avatar_url, bio, banned, created_at, last_seen FROM users ORDER BY id DESC"
+    );
+
+    const notificationsResult = await pool.query(
+      "SELECT id, title, message, created_at FROM admin_notifications ORDER BY id DESC LIMIT 10"
     );
 
     res.json({
@@ -223,12 +257,108 @@ app.get("/status", async (req, res) => {
       launcherUsers: Array.from(onlineLauncher.values()),
       gameUsers: Array.from(onlineGames.values()),
       accounts: accountsResult.rows.map(publicUser),
+      notifications: notificationsResult.rows,
       serverTime: new Date().toISOString()
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+
+// =======================
+// ADMIN DASHBOARD API
+// =======================
+
+app.get("/admin/stats", async (req, res) => {
+  try {
+    if (!adminOk(req)) return res.status(401).json({ ok: false, error: "ADMIN_KEY inválida." });
+
+    cleanup();
+
+    const users = await pool.query("SELECT COUNT(*)::int AS total FROM users");
+    const banned = await pool.query("SELECT COUNT(*)::int AS total FROM users WHERE banned=true");
+
+    res.json({
+      ok: true,
+      users: users.rows[0].total,
+      banned: banned.rows[0].total,
+      launcherOnline: onlineLauncher.size,
+      gameOnline: onlineGames.size,
+      serverTime: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/users", async (req, res) => {
+  try {
+    if (!adminOk(req)) return res.status(401).json({ ok: false, error: "ADMIN_KEY inválida." });
+
+    const result = await pool.query(
+      "SELECT id, username, player_name, avatar_url, bio, banned, created_at, last_seen FROM users ORDER BY id DESC"
+    );
+
+    res.json({ ok: true, users: result.rows.map(publicUser) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/ban", async (req, res) => {
+  try {
+    if (!adminOk(req)) return res.status(401).json({ ok: false, error: "ADMIN_KEY inválida." });
+
+    const username = String(req.body.username || "").trim().toLowerCase();
+    const banned = !!req.body.banned;
+
+    const result = await pool.query(
+      "UPDATE users SET banned=$1 WHERE username=$2 RETURNING *",
+      [banned, username]
+    );
+
+    onlineLauncher.delete(username);
+    onlineGames.delete(username);
+
+    res.json({ ok: true, user: result.rows[0] ? publicUser(result.rows[0]) : null });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/notify", async (req, res) => {
+  try {
+    if (!adminOk(req)) return res.status(401).json({ ok: false, error: "ADMIN_KEY inválida." });
+
+    const title = String(req.body.title || "Aviso ZTR").trim();
+    const message = String(req.body.message || "").trim();
+
+    await pool.query(
+      "INSERT INTO admin_notifications (title, message) VALUES ($1,$2)",
+      [title, message]
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/notifications", async (req, res) => {
+  try {
+    if (!adminOk(req)) return res.status(401).json({ ok: false, error: "ADMIN_KEY inválida." });
+
+    const result = await pool.query(
+      "SELECT id, title, message, created_at FROM admin_notifications ORDER BY id DESC LIMIT 50"
+    );
+
+    res.json({ ok: true, notifications: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 
 initDb().then(() => {
   const PORT = process.env.PORT || 3000;
