@@ -9,7 +9,7 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-const ADMIN_KEY = process.env.ADMIN_KEY || "troque-essa-senha";
+const ADMIN_KEY = process.env.ADMIN_KEY || "ZTR@2023";
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
