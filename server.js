@@ -16,7 +16,7 @@ const pool = new Pool({
 
 const onlineLauncher = new Map();
 const onlineGames = new Map();
-const ADMIN_KEY = process.env.ADMIN_KEY || "troque-essa-senha";
+const ADMIN_KEY = process.env.ADMIN_KEY || "ZTR@2023";
 
 function sha256(text) {
   return crypto.createHash("sha256").update("ZTR-SALT-" + text).digest("hex");
