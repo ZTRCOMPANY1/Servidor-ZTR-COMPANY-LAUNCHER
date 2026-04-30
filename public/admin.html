@@ -43,12 +43,12 @@
   </section>
 
   <section class="card">
-    <h2>Enviar notificação</h2>
+    <h2>Enviar notificação para o launcher</h2>
     <div class="row">
       <input id="ntitle" placeholder="Título">
       <button onclick="sendNotification()">Enviar</button>
     </div>
-    <textarea id="nmessage" placeholder="Mensagem"></textarea>
+    <textarea id="nmessage" placeholder="Mensagem que vai aparecer no launcher"></textarea>
   </section>
 
   <section class="card">
@@ -132,9 +132,11 @@ async function sendNotification(){
   const title = ntitle.value.trim();
   const message = nmessage.value.trim();
   if(!title || !message){alert("Preencha título e mensagem"); return;}
-  await post("/admin/notify", {title, message});
+  const result = await post("/admin/notify", {title, message});
+  if(!result.ok){alert(result.error || "Erro ao enviar"); return;}
   ntitle.value = "";
   nmessage.value = "";
+  alert("Notificação enviada. Ela aparece no launcher quando ele buscar /status.");
   loadAll();
 }
 

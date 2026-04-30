@@ -138,10 +138,6 @@ app.post("/auth/login", async (req, res) => {
       return res.json({ ok: false, error: "Username ou senha incorretos." });
     }
 
-    if (user.banned) {
-      return res.json({ ok: false, error: "Conta banida." });
-    }
-
     const authToken = token();
 
     const updated = await pool.query(
@@ -248,7 +244,7 @@ app.get("/status", async (req, res) => {
     );
 
     const notificationsResult = await pool.query(
-      "SELECT id, title, message, created_at FROM admin_notifications ORDER BY id DESC LIMIT 10"
+      "SELECT id, title, message, created_at FROM admin_notifications ORDER BY id DESC LIMIT 20"
     );
 
     res.json({
@@ -273,7 +269,6 @@ app.get("/status", async (req, res) => {
 app.get("/admin/stats", async (req, res) => {
   try {
     if (!adminOk(req)) return res.status(401).json({ ok: false, error: "ADMIN_KEY inválida." });
-
     cleanup();
 
     const users = await pool.query("SELECT COUNT(*)::int AS total FROM users");
@@ -333,6 +328,10 @@ app.post("/admin/notify", async (req, res) => {
 
     const title = String(req.body.title || "Aviso ZTR").trim();
     const message = String(req.body.message || "").trim();
+
+    if (!title || !message) {
+      return res.json({ ok: false, error: "Título e mensagem são obrigatórios." });
+    }
 
     await pool.query(
       "INSERT INTO admin_notifications (title, message) VALUES ($1,$2)",
